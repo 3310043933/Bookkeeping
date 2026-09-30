@@ -20,25 +20,28 @@ data class RecognitionResult(
     val product: String,
     val description: String,
     val amount: Double,
-    val category: String,
+    val primaryCategory: String,
+    val secondaryCategory: String,
     val rawResponse: String
 ) {
     val title: String get() = if (merchant.isBlank()) product else "$merchant-$product"
 }
 
 class FoodRecognitionService(private val context: Context) {
-    suspend fun recognize(images: List<Uri>, provider: ModelProvider, apiKey: String, customPrompt: String): RecognitionResult =
+    suspend fun recognize(images: List<Uri>, provider: ModelProvider, apiKey: String, customPrompt: String, categories: Map<String,List<String>>): RecognitionResult =
         withContext(Dispatchers.IO) {
             require(apiKey.isNotBlank()) { "请先在左上角菜单中填写 ${provider.displayName} Key" }
             val encoded = images.map(::encodeImage)
+            val categoryRules = categories.entries.joinToString("；") { (primary, secondary) -> "$primary：${secondary.joinToString("、")}" }
+            val prompt = "$customPrompt\n可用分类树如下，只能从中选择：$categoryRules"
             val response = when (provider) {
-                ModelProvider.OPENAI -> callOpenAiCompatible("https://api.openai.com/v1/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
-                ModelProvider.DEEPSEEK -> callOpenAiCompatible("https://api.deepseek.com/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
-                ModelProvider.QWEN -> callOpenAiCompatible("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
-                ModelProvider.GEMINI -> callGemini(provider.modelName, apiKey, encoded, customPrompt)
-                ModelProvider.ANTHROPIC -> callAnthropic(provider.modelName, apiKey, encoded, customPrompt)
+                ModelProvider.OPENAI -> callOpenAiCompatible("https://api.openai.com/v1/chat/completions", provider.modelName, apiKey, encoded, prompt)
+                ModelProvider.DEEPSEEK -> callOpenAiCompatible("https://api.deepseek.com/chat/completions", provider.modelName, apiKey, encoded, prompt)
+                ModelProvider.QWEN -> callOpenAiCompatible("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider.modelName, apiKey, encoded, prompt)
+                ModelProvider.GEMINI -> callGemini(provider.modelName, apiKey, encoded, prompt)
+                ModelProvider.ANTHROPIC -> callAnthropic(provider.modelName, apiKey, encoded, prompt)
             }
-            parseResult(response)
+            parseResult(response, categories)
         }
 
     private fun callOpenAiCompatible(url: String, model: String, key: String, images: List<String>, customPrompt: String): String {
@@ -112,25 +115,29 @@ class FoodRecognitionService(private val context: Context) {
         }
     }
 
-    private fun parseResult(raw: String): RecognitionResult {
+    private fun parseResult(raw: String, categories: Map<String,List<String>>): RecognitionResult {
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val json = JSONObject(cleaned)
+        val requestedPrimary=json.optString("一级分类").trim()
+        val primary=requestedPrimary.takeIf{it in categories} ?: categories.keys.firstOrNull().orEmpty()
+        val requestedSecondary=json.optString("二级分类").trim()
+        val secondary=requestedSecondary.takeIf{it in categories[primary].orEmpty()} ?: categories[primary]?.firstOrNull().orEmpty()
         return RecognitionResult(
             merchant = json.optString("店家").trim(),
             product = json.optString("商品", "识别到的商品").trim(),
             description = json.optString("主要描述").trim(),
-            category = json.optString("分类", "餐饮").takeIf { it in CATEGORIES } ?: "餐饮",
+            primaryCategory = primary,
+            secondaryCategory = secondary,
             amount = json.optDouble("金额", 0.0).takeIf { !it.isNaN() } ?: 0.0,
             rawResponse = raw
         )
     }
 
-    private fun finalPrompt(customPrompt: String) = """$customPrompt
+    private fun finalPrompt(customPrompt: String, categories: Map<String,List<String>> = emptyMap()) = """$customPrompt
 必须只返回一个合法JSON对象，不得包含Markdown或额外文字。字段和格式必须严格为：
-{"店家":"店家名称，没有则为空字符串","商品":"商品或餐食名称","主要描述":"商品明细、规格或识别说明","金额":0.00,"分类":"餐饮"}
-金额必须是JSON数字。分类只能是：餐饮、水果、零食、饮品、买菜、其他。"""
+{"店家":"店家名称，没有则为空字符串","商品":"商品或餐食名称","主要描述":"商品明细、规格或识别说明","金额":0.00,"一级分类":"餐饮","二级分类":"外卖"}
+金额必须是JSON数字。“一级分类”和“二级分类”必须同时返回，且二级分类必须属于一级分类。"""
 
     private companion object {
-        val CATEGORIES = setOf("餐饮", "水果", "零食", "饮品", "买菜", "其他")
     }
 }

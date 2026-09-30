@@ -381,6 +381,7 @@ private fun AddEntrySheet(
     LaunchedEffect(state.recognizedMeal) {
         if (state.recognizedMeal.isNotBlank()) {
             meal = state.recognizedMeal
+            primary = state.recognizedPrimaryCategory
             secondary = state.recognizedCategory
             if (state.recognizedAmount.isNotBlank()) amount = state.recognizedAmount
             note = state.recognizedNote

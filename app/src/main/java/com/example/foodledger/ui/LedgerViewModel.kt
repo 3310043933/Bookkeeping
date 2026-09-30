@@ -23,6 +23,7 @@ data class LedgerUiState(
     val recognizing: Boolean = false,
     val recognitionError: String = "",
     val recognizedMeal: String = "",
+    val recognizedPrimaryCategory: String = "",
     val recognizedCategory: String = "餐饮",
     val recognizedAmount: String = "",
     val recognizedNote: String = "",
@@ -65,12 +66,13 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             val provider = _state.value.selectedProvider
             val prompt = _state.value.recognitionPrompt
             runCatching {
-                recognition.recognize(images, provider, _state.value.providerKeys[provider].orEmpty(), prompt)
+                recognition.recognize(images, provider, _state.value.providerKeys[provider].orEmpty(), prompt, _state.value.categories)
             }.onSuccess { result ->
                 _state.value = _state.value.copy(
                     recognizing = false,
                     recognizedMeal = result.title,
-                    recognizedCategory = result.category,
+                    recognizedPrimaryCategory = result.primaryCategory,
+                    recognizedCategory = result.secondaryCategory,
                     recognizedAmount = if (result.amount > 0) result.amount.toString() else "",
                     recognizedNote = result.description,
                     requestLogs = requestLogRepository.add(ModelRequestLog(
@@ -116,6 +118,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     fun consumeRecognition() {
         _state.value = _state.value.copy(
             recognizedMeal = "",
+            recognizedPrimaryCategory = "",
             recognizedCategory = "餐饮",
             recognizedAmount = "",
             recognizedNote = "",
