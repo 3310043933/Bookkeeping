@@ -62,7 +62,9 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
                     onSaveKey = vm::saveProviderKey,
                     onSavePrompt = vm::saveRecognitionPrompt,
                     onClearLogs = vm::clearRequestLogs,
-                    onAddCategory = vm::addCategory
+                    onAddCategory = vm::addCategory,
+                    onDeletePrimary = vm::deletePrimaryCategory,
+                    onDeleteSecondary = vm::deleteSecondaryCategory
                 )
             }
         }
@@ -123,7 +125,9 @@ private fun AppDrawer(
     onSaveKey: (ModelProvider, String) -> Unit,
     onSavePrompt: (String) -> Unit,
     onClearLogs: () -> Unit,
-    onAddCategory: (String,String) -> Unit
+    onAddCategory: (String,String) -> Unit,
+    onDeletePrimary: (String) -> Unit,
+    onDeleteSecondary: (String,String) -> Unit
 ) {
     var section by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -150,19 +154,22 @@ private fun AppDrawer(
                 0 -> KeySettingsContent(state, onSelect, onSaveKey)
                 1 -> RequestLogsContent(state, onClearLogs)
                 2 -> PromptSettingsContent(state.recognitionPrompt, onSavePrompt)
-                else -> CategorySettingsContent(state, onAddCategory)
+                else -> CategorySettingsContent(state, onAddCategory, onDeletePrimary, onDeleteSecondary)
             }
         }
     }
 }
 
-@Composable private fun CategorySettingsContent(state: LedgerUiState,onAdd:(String,String)->Unit){
+@Composable private fun CategorySettingsContent(state: LedgerUiState,onAdd:(String,String)->Unit,onDeletePrimary:(String)->Unit,onDeleteSecondary:(String,String)->Unit){
  var p by remember{mutableStateOf("")};var s by remember{mutableStateOf("")}
+ var pendingPrimary by remember{mutableStateOf<String?>(null)};var pendingSecondary by remember{mutableStateOf<Pair<String,String>?>(null)}
  LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
   item{Text("一级 / 二级分类",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
-  items(state.categories.entries.toList()){e->Card{Column(Modifier.padding(12.dp)){Text(e.key,fontWeight=FontWeight.Bold);Text(e.value.joinToString(" · "),style=MaterialTheme.typography.bodySmall)}}}
+  items(state.categories.entries.toList()){e->Card{Column(Modifier.padding(12.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text(e.key,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));IconButton({pendingPrimary=e.key}){Icon(Icons.Default.Delete,"删除一级分类",tint=MaterialTheme.colorScheme.error)}};e.value.forEach{sub->Row(verticalAlignment=Alignment.CenterVertically){Text(sub,modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium);IconButton({pendingSecondary=e.key to sub},Modifier.size(36.dp)){Icon(Icons.Default.Close,"删除二级分类",Modifier.size(18.dp))}}}}}}
   item{OutlinedTextField(p,{p=it},Modifier.fillMaxWidth(),label={Text("一级类别")});OutlinedTextField(s,{s=it},Modifier.fillMaxWidth(),label={Text("二级类别")});Button({onAdd(p,s);s=""},Modifier.fillMaxWidth()){Text("添加分类")}}
  }
+ pendingPrimary?.let{name->AlertDialog(onDismissRequest={pendingPrimary=null},title={Text("删除一级分类？")},text={Text("“$name”及其全部二级分类都会被删除，已有账目不会被删除。")},confirmButton={TextButton({onDeletePrimary(name);pendingPrimary=null}){Text("删除",color=MaterialTheme.colorScheme.error)}},dismissButton={TextButton({pendingPrimary=null}){Text("取消")}})}
+ pendingSecondary?.let{pair->AlertDialog(onDismissRequest={pendingSecondary=null},title={Text("删除二级分类？")},text={Text("确定删除“${pair.second}”吗？已有账目不会被删除。")},confirmButton={TextButton({onDeleteSecondary(pair.first,pair.second);pendingSecondary=null}){Text("删除",color=MaterialTheme.colorScheme.error)}},dismissButton={TextButton({pendingSecondary=null}){Text("取消")}})}
 }
 
 @Composable private fun StatisticsView(entries:List<LedgerEntry>,modifier:Modifier=Modifier){

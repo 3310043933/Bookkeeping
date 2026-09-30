@@ -138,6 +138,8 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addCategory(primary: String, secondary: String) { if(primary.isBlank()||secondary.isBlank())return; val m=_state.value.categories.toMutableMap(); m[primary]=(m[primary].orEmpty()+secondary).distinct(); categoryRepository.save(m); _state.value=_state.value.copy(categories=m) }
+    fun deletePrimaryCategory(primary: String) { val m=_state.value.categories.toMutableMap(); m.remove(primary); categoryRepository.save(m); _state.value=_state.value.copy(categories=m) }
+    fun deleteSecondaryCategory(primary: String, secondary: String) { val m=_state.value.categories.toMutableMap(); m[primary]=m[primary].orEmpty().filterNot{it==secondary}; categoryRepository.save(m); _state.value=_state.value.copy(categories=m) }
 
     fun delete(id: Long) {
         val updated = _state.value.entries.filterNot { it.id == id }
