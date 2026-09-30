@@ -1,0 +1,28 @@
+# 食记账（原生 Android）
+
+一个使用 Kotlin + Jetpack Compose 编写的本地记账应用，最低支持 Android 6.0（API 23）。
+
+## 已实现
+
+- 记录每天吃了什么、金额、分类和备注
+- 今日消费合计、今日记录与全部记录
+- 一次选择多张图片（最多 12 张），缩略图预览与移除
+- 图片 URI 持久权限，重启应用后仍可显示已选图片
+- 支持 OpenAI、DeepSeek、Google Gemini、Anthropic Claude、阿里云通义千问的真实多图识别
+- 左侧抽屉管理模型 Key、切换当前模型，并直达各厂商官方 Key 页面
+- API Key 使用 Android Keystore 加密后保存在本机
+- 本地持久化，无需登录、无需网络
+
+## 图片识别说明
+
+点击首页左上角菜单，填写并选择一个模型厂商。选择多张图片后，应用会先在本地压缩图片，再调用所选厂商的视觉接口，识别餐食名称和分类。
+
+个人测试场景下 Key 会由 Android Keystore 加密并仅存放在本机。正式公开分发应用时，仍建议通过自己的后端转发请求，避免终端设备中的 Key 被提取或滥用。
+
+## 运行
+
+1. 使用 Android Studio 打开项目根目录。
+2. 等待 Gradle Sync 完成。
+3. 选择 Android 6.0 以上模拟器或真机运行 `app`。
+
+项目使用 JDK 17、Gradle 8.13 和 Android Gradle Plugin 8.13。
