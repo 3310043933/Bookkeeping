@@ -26,6 +26,7 @@ data class LedgerUiState(
     val recognizedPrimaryCategory: String = "",
     val recognizedCategory: String = "餐饮",
     val recognizedAmount: String = "",
+    val recognizedDate: String = "",
     val recognizedNote: String = "",
     val selectedProvider: ModelProvider = ModelProvider.OPENAI,
     val providerKeys: Map<ModelProvider, String> = emptyMap(),
@@ -74,6 +75,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     recognizedPrimaryCategory = result.primaryCategory,
                     recognizedCategory = result.secondaryCategory,
                     recognizedAmount = if (result.amount > 0) result.amount.toString() else "",
+                    recognizedDate = result.date,
                     recognizedNote = result.description,
                     requestLogs = requestLogRepository.add(ModelRequestLog(
                         id = started, timestamp = started, provider = provider.displayName,
@@ -121,14 +123,17 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             recognizedPrimaryCategory = "",
             recognizedCategory = "餐饮",
             recognizedAmount = "",
+            recognizedDate = "",
             recognizedNote = "",
             recognitionError = ""
         )
     }
 
-    fun saveEntry(existing: LedgerEntry?, meal: String, amount: Double, primary: String, secondary: String, type: String, note: String) {
+    fun saveEntry(existing: LedgerEntry?, meal: String, amount: Double, date: String, primary: String, secondary: String, type: String, note: String) {
+        val parsedDate=runCatching{java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.CHINA).parse(date)?.time}.getOrNull() ?: System.currentTimeMillis()
         val entry = LedgerEntry(
             id = existing?.id ?: System.currentTimeMillis(), createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            transactionDate = parsedDate,
             meal = meal.trim(),
             amount = amount,
             category = secondary, primaryCategory = primary, secondaryCategory = secondary, transactionType = type,

@@ -15,6 +15,7 @@ class LedgerRepository(context: Context) {
             LedgerEntry(
                 id = item.getLong("id"),
                 createdAt = item.getLong("createdAt"),
+                transactionDate = item.optLong("transactionDate", item.getLong("createdAt")),
                 meal = item.getString("meal"),
                 amount = item.getDouble("amount"),
                 category = item.getString("category"),
@@ -33,6 +34,7 @@ class LedgerRepository(context: Context) {
             array.put(JSONObject().apply {
                 put("id", entry.id)
                 put("createdAt", entry.createdAt)
+                put("transactionDate", entry.transactionDate)
                 put("meal", entry.meal)
                 put("amount", entry.amount)
                 put("category", entry.category)

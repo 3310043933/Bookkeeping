@@ -108,8 +108,8 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
             onImages = vm::setImages,
             onRemoveImage = vm::removeImage,
             onRecognize = vm::recognizeImages,
-            onSave = { meal, amount, primary, secondary, type, note ->
-                vm.saveEntry(editingEntry, meal, amount, primary, secondary, type, note)
+            onSave = { meal, amount, date, primary, secondary, type, note ->
+                vm.saveEntry(editingEntry, meal, amount, date, primary, secondary, type, note)
                 vm.consumeRecognition()
                 editingEntry=null
                 showAdd = false
@@ -129,8 +129,9 @@ private fun AppDrawer(
     onDeletePrimary: (String) -> Unit,
     onDeleteSecondary: (String,String) -> Unit
 ) {
-    var section by remember { mutableIntStateOf(0) }
+    var section by remember { mutableIntStateOf(-1) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
+      if(section==-1){
         Text("食记账设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
         NavigationDrawerItem(
             label = { Text("模型 Key 设置") }, selected = section == 0,
@@ -148,7 +149,9 @@ private fun AppDrawer(
             label = { Text("识别指令设置") }, selected = section == 2,
             onClick = { section = 2 }, icon = { Icon(Icons.Default.EditNote, null) }, modifier = Modifier.padding(horizontal = 12.dp)
         )
-        HorizontalDivider(Modifier.padding(top = 8.dp))
+      } else {
+        Row(verticalAlignment=Alignment.CenterVertically,modifier=Modifier.padding(8.dp)){IconButton({section=-1}){Icon(Icons.Default.ArrowBack,"返回设置菜单")};Text(when(section){0->"模型 Key 设置";1->"模型请求记录";2->"识别指令设置";else->"分类管理"},style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)}
+        HorizontalDivider()
         Box(Modifier.weight(1f)) {
             when (section) {
                 0 -> KeySettingsContent(state, onSelect, onSaveKey)
@@ -157,6 +160,7 @@ private fun AppDrawer(
                 else -> CategorySettingsContent(state, onAddCategory, onDeletePrimary, onDeleteSecondary)
             }
         }
+      }
     }
 }
 
@@ -314,6 +318,7 @@ private fun SummaryCard(total: Double, count: Int) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntryList(entries: List<LedgerEntry>, onDelete: (Long) -> Unit, onEdit: (LedgerEntry) -> Unit, modifier: Modifier = Modifier) {
     if (entries.isEmpty()) {
@@ -327,14 +332,16 @@ private fun EntryList(entries: List<LedgerEntry>, onDelete: (Long) -> Unit, onEd
         return
     }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(entries, key = { it.id }) { entry -> EntryCard(entry, onDelete, onEdit) }
+        items(entries, key = { it.id }) { entry ->
+            val dismiss=rememberSwipeToDismissBoxState(confirmValueChange={if(it==SwipeToDismissBoxValue.EndToStart){onDelete(entry.id);true}else false})
+            SwipeToDismissBox(state=dismiss,enableDismissFromStartToEnd=false,backgroundContent={Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.error,RoundedCornerShape(12.dp)).padding(16.dp),contentAlignment=Alignment.CenterEnd){Icon(Icons.Default.Delete,"删除",tint=Color.White)}}){EntryCard(entry,onEdit)}
+        }
     }
 }
 
 @Composable
-private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit, onEdit: (LedgerEntry) -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) {
+private fun EntryCard(entry: LedgerEntry, onEdit: (LedgerEntry) -> Unit) {
+    Card(onClick={onEdit(entry)},modifier=Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.RestaurantMenu, null, tint = MaterialTheme.colorScheme.primary)
@@ -347,13 +354,6 @@ private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit, onEdit: (Led
                 if (entry.imageUris.isNotEmpty()) Text("${entry.imageUris.size} 张图片", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
             Text("${if(entry.transactionType=="INCOME") "+" else "-"}¥ %.2f".format(entry.amount), fontWeight = FontWeight.Bold, color=if(entry.transactionType=="INCOME") Color(0xFF2E7D32) else MaterialTheme.colorScheme.error)
-            Box {
-                IconButton({ menu = true }) { Icon(Icons.Default.MoreVert, "更多") }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("修改") }, onClick = { menu=false; onEdit(entry) }, leadingIcon = { Icon(Icons.Default.Edit, null) })
-                    DropdownMenuItem({ Text("删除") }, onClick = { menu = false; onDelete(entry.id) }, leadingIcon = { Icon(Icons.Default.Delete, null) })
-                }
-            }
         }
     }
 }
@@ -367,11 +367,12 @@ private fun AddEntrySheet(
     onImages: (List<Uri>) -> Unit,
     onRemoveImage: (Uri) -> Unit,
     onRecognize: () -> Unit,
-    onSave: (String, Double, String, String, String, String) -> Unit
+    onSave: (String, Double, String, String, String, String, String) -> Unit
 ) {
     val context = LocalContext.current
     var meal by remember(existing) { mutableStateOf(existing?.meal.orEmpty()) }
     var amount by remember(existing) { mutableStateOf(existing?.amount?.toString().orEmpty()) }
+    var date by remember(existing) { mutableStateOf(SimpleDateFormat("yyyy-MM-dd",Locale.CHINA).format(Date(existing?.transactionDate ?: System.currentTimeMillis()))) }
     var primary by remember(existing) { mutableStateOf(existing?.primaryCategory ?: state.categories.keys.firstOrNull().orEmpty()) }
     var secondary by remember(existing, primary) { mutableStateOf(existing?.secondaryCategory ?: state.categories[primary]?.firstOrNull().orEmpty()) }
     var type by remember(existing) { mutableStateOf(existing?.transactionType ?: "EXPENSE") }
@@ -384,6 +385,7 @@ private fun AddEntrySheet(
             primary = state.recognizedPrimaryCategory
             secondary = state.recognizedCategory
             if (state.recognizedAmount.isNotBlank()) amount = state.recognizedAmount
+            if (state.recognizedDate.isNotBlank()) date = state.recognizedDate
             note = state.recognizedNote
         }
     }
@@ -395,13 +397,14 @@ private fun AddEntrySheet(
         if (uris.isNotEmpty()) onImages((state.selectedImages + uris).distinct().take(12))
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+      Surface(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item { Text(if(existing==null) "记一笔" else "修改记录", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { Row(verticalAlignment=Alignment.CenterVertically){IconButton(onDismiss){Icon(Icons.Default.ArrowBack,"返回")};Text(if(existing==null) "记一笔" else "修改记录", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)} }
             item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { FilterChip(type=="EXPENSE",{type="EXPENSE"},{Text("消费 -")}); FilterChip(type=="INCOME",{type="INCOME"},{Text("收入 +")}) } }
             item {
                 OutlinedTextField(meal, { meal = it; error = null }, Modifier.fillMaxWidth(), label = { Text("今天吃了什么") }, singleLine = true)
@@ -412,6 +415,7 @@ private fun AddEntrySheet(
                     Modifier.fillMaxWidth(), label = { Text("花费金额") }, prefix = { Text("¥ ") }, singleLine = true
                 )
             }
+            item { OutlinedTextField(date,{date=it},Modifier.fillMaxWidth(),label={Text("日期（yyyy-MM-dd）")},singleLine=true) }
             item {
                 Text("一级分类", style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -474,13 +478,14 @@ private fun AddEntrySheet(
                         when {
                             meal.isBlank() -> error = "请填写吃了什么"
                             value == null || value < 0 -> error = "请输入正确金额"
-                            else -> onSave(meal, value, primary, secondary, type, note)
+                            else -> onSave(meal, value, date, primary, secondary, type, note)
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) { Text("保存记录") }
             }
         }
+      }
     }
 }
 

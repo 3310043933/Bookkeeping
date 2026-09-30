@@ -20,6 +20,7 @@ data class RecognitionResult(
     val product: String,
     val description: String,
     val amount: Double,
+    val date: String,
     val primaryCategory: String,
     val secondaryCategory: String,
     val rawResponse: String
@@ -129,13 +130,14 @@ class FoodRecognitionService(private val context: Context) {
             primaryCategory = primary,
             secondaryCategory = secondary,
             amount = json.optDouble("金额", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+            date = json.optString("日期").trim(),
             rawResponse = raw
         )
     }
 
     private fun finalPrompt(customPrompt: String, categories: Map<String,List<String>> = emptyMap()) = """$customPrompt
 必须只返回一个合法JSON对象，不得包含Markdown或额外文字。字段和格式必须严格为：
-{"店家":"店家名称，没有则为空字符串","商品":"商品或餐食名称","主要描述":"商品明细、规格或识别说明","金额":0.00,"一级分类":"餐饮","二级分类":"外卖"}
+{"店家":"店家名称，没有则为空字符串","商品":"商品或餐食名称","主要描述":"商品明细、规格或识别说明","金额":0.00,"日期":"2026-09-30","一级分类":"餐饮","二级分类":"外卖"}
 金额必须是JSON数字。“一级分类”和“二级分类”必须同时返回，且二级分类必须属于一级分类。"""
 
     private companion object {
