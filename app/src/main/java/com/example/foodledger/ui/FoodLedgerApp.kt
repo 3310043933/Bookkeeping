@@ -55,10 +55,12 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(Modifier.fillMaxWidth(.9f)) {
-                ModelSettingsDrawer(
+                AppDrawer(
                     state = state,
                     onSelect = vm::selectProvider,
-                    onSaveKey = vm::saveProviderKey
+                    onSaveKey = vm::saveProviderKey,
+                    onSavePrompt = vm::saveRecognitionPrompt,
+                    onClearLogs = vm::clearRequestLogs
                 )
             }
         }
@@ -110,14 +112,48 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
 }
 
 @Composable
-private fun ModelSettingsDrawer(
+private fun AppDrawer(
+    state: LedgerUiState,
+    onSelect: (ModelProvider) -> Unit,
+    onSaveKey: (ModelProvider, String) -> Unit,
+    onSavePrompt: (String) -> Unit,
+    onClearLogs: () -> Unit
+) {
+    var section by remember { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Text("食记账设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
+        NavigationDrawerItem(
+            label = { Text("模型 Key 设置") }, selected = section == 0,
+            onClick = { section = 0 }, icon = { Icon(Icons.Default.Key, null) }, modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        NavigationDrawerItem(
+            label = { Text("模型请求记录") }, selected = section == 1,
+            onClick = { section = 1 }, icon = { Icon(Icons.Default.History, null) }, modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        NavigationDrawerItem(
+            label = { Text("识别指令设置") }, selected = section == 2,
+            onClick = { section = 2 }, icon = { Icon(Icons.Default.EditNote, null) }, modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        HorizontalDivider(Modifier.padding(top = 8.dp))
+        Box(Modifier.weight(1f)) {
+            when (section) {
+                0 -> KeySettingsContent(state, onSelect, onSaveKey)
+                1 -> RequestLogsContent(state, onClearLogs)
+                else -> PromptSettingsContent(state.recognitionPrompt, onSavePrompt)
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeySettingsContent(
     state: LedgerUiState,
     onSelect: (ModelProvider) -> Unit,
     onSaveKey: (ModelProvider, String) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
     var visibleKeys by remember { mutableStateOf(emptySet<ModelProvider>()) }
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(10.dp))
@@ -175,6 +211,51 @@ private fun ModelSettingsDrawer(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RequestLogsContent(state: LedgerUiState, onClearLogs: () -> Unit) {
+    var expandedId by remember { mutableStateOf<Long?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("最近 50 条请求", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onClearLogs, enabled = state.requestLogs.isNotEmpty()) { Text("清空") }
+        }
+        if (state.requestLogs.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无请求记录") }
+        } else LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(state.requestLogs, key = { it.id }) { log ->
+                Card(onClick = { expandedId = if (expandedId == log.id) null else log.id }) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(log.provider, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Text(if (log.error.isBlank()) "成功" else "失败", color = if (log.error.isBlank()) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error)
+                        }
+                        Text("${formatTime(log.timestamp)} · ${log.imageCount} 张 · ${log.durationMs} ms", style = MaterialTheme.typography.bodySmall)
+                        if (expandedId == log.id) {
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("模型：${log.model}", style = MaterialTheme.typography.bodySmall)
+                            Text("请求指令：\n${log.prompt}", style = MaterialTheme.typography.bodySmall)
+                            Text(if (log.error.isBlank()) "原始响应：\n${log.response}" else "错误：\n${log.error}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptSettingsContent(prompt: String, onSavePrompt: (String) -> Unit) {
+    var draft by remember(prompt) { mutableStateOf(prompt) }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("让模型做什么", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("JSON 字段格式由应用固定附加，这里只需描述识别规则。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(draft, { draft = it }, Modifier.fillMaxWidth().weight(1f), label = { Text("自定义识别指令") }, minLines = 8)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { onSavePrompt(draft) }, modifier = Modifier.fillMaxWidth()) { Text("保存识别指令") }
     }
 }
 
@@ -262,6 +343,7 @@ private fun AddEntrySheet(
             meal = state.recognizedMeal
             category = state.recognizedCategory
             if (state.recognizedAmount.isNotBlank()) amount = state.recognizedAmount
+            note = state.recognizedNote
         }
     }
 

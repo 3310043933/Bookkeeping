@@ -8,7 +8,9 @@ import com.example.foodledger.data.LedgerEntry
 import com.example.foodledger.data.LedgerRepository
 import com.example.foodledger.recognition.FoodRecognitionService
 import com.example.foodledger.recognition.ModelProvider
+import com.example.foodledger.recognition.ModelRequestLog
 import com.example.foodledger.recognition.ModelSettingsRepository
+import com.example.foodledger.recognition.RequestLogRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,18 +24,24 @@ data class LedgerUiState(
     val recognizedMeal: String = "",
     val recognizedCategory: String = "餐饮",
     val recognizedAmount: String = "",
+    val recognizedNote: String = "",
     val selectedProvider: ModelProvider = ModelProvider.OPENAI,
-    val providerKeys: Map<ModelProvider, String> = emptyMap()
+    val providerKeys: Map<ModelProvider, String> = emptyMap(),
+    val recognitionPrompt: String = ModelSettingsRepository.DEFAULT_PROMPT,
+    val requestLogs: List<ModelRequestLog> = emptyList()
 )
 
 class LedgerViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = LedgerRepository(application)
     private val settings = ModelSettingsRepository(application)
+    private val requestLogRepository = RequestLogRepository(application)
     private val recognition = FoodRecognitionService(application)
     private val _state = MutableStateFlow(LedgerUiState(
         entries = repository.load(),
         selectedProvider = settings.selectedProvider(),
-        providerKeys = ModelProvider.entries.associateWith(settings::getKey)
+        providerKeys = ModelProvider.entries.associateWith(settings::getKey),
+        recognitionPrompt = settings.recognitionPrompt(),
+        requestLogs = requestLogRepository.load()
     ))
     val state: StateFlow<LedgerUiState> = _state.asStateFlow()
 
@@ -50,20 +58,33 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         if (images.isEmpty() || _state.value.recognizing) return
         viewModelScope.launch {
             _state.value = _state.value.copy(recognizing = true, recognitionError = "")
+            val started = System.currentTimeMillis()
+            val provider = _state.value.selectedProvider
+            val prompt = _state.value.recognitionPrompt
             runCatching {
-                val provider = _state.value.selectedProvider
-                recognition.recognize(images, provider, _state.value.providerKeys[provider].orEmpty())
+                recognition.recognize(images, provider, _state.value.providerKeys[provider].orEmpty(), prompt)
             }.onSuccess { result ->
                 _state.value = _state.value.copy(
                     recognizing = false,
-                    recognizedMeal = result.meal,
+                    recognizedMeal = result.title,
                     recognizedCategory = result.category,
-                    recognizedAmount = if (result.suggestedAmount > 0) result.suggestedAmount.toString() else ""
+                    recognizedAmount = if (result.amount > 0) result.amount.toString() else "",
+                    recognizedNote = result.description,
+                    requestLogs = requestLogRepository.add(ModelRequestLog(
+                        id = started, timestamp = started, provider = provider.displayName,
+                        model = provider.modelName, imageCount = images.size, prompt = prompt,
+                        response = result.rawResponse, error = "", durationMs = System.currentTimeMillis() - started
+                    ))
                 )
             }.onFailure { error ->
                 _state.value = _state.value.copy(
                     recognizing = false,
-                    recognitionError = error.message ?: "识别失败，请检查网络和 Key"
+                    recognitionError = error.message ?: "识别失败，请检查网络和 Key",
+                    requestLogs = requestLogRepository.add(ModelRequestLog(
+                        id = started, timestamp = started, provider = provider.displayName,
+                        model = provider.modelName, imageCount = images.size, prompt = prompt,
+                        response = "", error = error.message ?: "未知错误", durationMs = System.currentTimeMillis() - started
+                    ))
                 )
             }
         }
@@ -79,11 +100,22 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _state.value = _state.value.copy(providerKeys = _state.value.providerKeys + (provider to key.trim()))
     }
 
+    fun saveRecognitionPrompt(prompt: String) {
+        settings.saveRecognitionPrompt(prompt)
+        _state.value = _state.value.copy(recognitionPrompt = prompt)
+    }
+
+    fun clearRequestLogs() {
+        requestLogRepository.clear()
+        _state.value = _state.value.copy(requestLogs = emptyList())
+    }
+
     fun consumeRecognition() {
         _state.value = _state.value.copy(
             recognizedMeal = "",
             recognizedCategory = "餐饮",
             recognizedAmount = "",
+            recognizedNote = "",
             recognitionError = ""
         )
     }

@@ -35,6 +35,12 @@ class ModelSettingsRepository(context: Context) {
         editor.apply()
     }
 
+    fun recognitionPrompt(): String = prefs.getString("recognition_prompt", DEFAULT_PROMPT) ?: DEFAULT_PROMPT
+
+    fun saveRecognitionPrompt(value: String) {
+        prefs.edit().putString("recognition_prompt", value.ifBlank { DEFAULT_PROMPT }).apply()
+    }
+
     private fun secretKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
@@ -65,5 +71,8 @@ class ModelSettingsRepository(context: Context) {
         return String(cipher.doFinal(combined.copyOfRange(12, combined.size)), Charsets.UTF_8)
     }
 
-    private companion object { const val KEY_ALIAS = "food_ledger_model_keys" }
+    companion object {
+        const val KEY_ALIAS = "food_ledger_model_keys"
+        const val DEFAULT_PROMPT = "识别图片中的消费信息。优先读取订单、收据或外卖截图；如果是食物照片则根据画面判断。金额必须是实际支付总额，无法确定时为0。分类只能是：餐饮、水果、零食、饮品、买菜、其他。"
+    }
 }

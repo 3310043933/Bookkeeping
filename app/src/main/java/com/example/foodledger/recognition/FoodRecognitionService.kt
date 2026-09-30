@@ -15,25 +15,34 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-data class RecognitionResult(val meal: String, val category: String, val suggestedAmount: Double)
+data class RecognitionResult(
+    val merchant: String,
+    val product: String,
+    val description: String,
+    val amount: Double,
+    val category: String,
+    val rawResponse: String
+) {
+    val title: String get() = if (merchant.isBlank()) product else "$merchant-$product"
+}
 
 class FoodRecognitionService(private val context: Context) {
-    suspend fun recognize(images: List<Uri>, provider: ModelProvider, apiKey: String): RecognitionResult =
+    suspend fun recognize(images: List<Uri>, provider: ModelProvider, apiKey: String, customPrompt: String): RecognitionResult =
         withContext(Dispatchers.IO) {
             require(apiKey.isNotBlank()) { "请先在左上角菜单中填写 ${provider.displayName} Key" }
             val encoded = images.map(::encodeImage)
             val response = when (provider) {
-                ModelProvider.OPENAI -> callOpenAiCompatible("https://api.openai.com/v1/chat/completions", provider.modelName, apiKey, encoded)
-                ModelProvider.DEEPSEEK -> callOpenAiCompatible("https://api.deepseek.com/chat/completions", provider.modelName, apiKey, encoded)
-                ModelProvider.QWEN -> callOpenAiCompatible("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider.modelName, apiKey, encoded)
-                ModelProvider.GEMINI -> callGemini(provider.modelName, apiKey, encoded)
-                ModelProvider.ANTHROPIC -> callAnthropic(provider.modelName, apiKey, encoded)
+                ModelProvider.OPENAI -> callOpenAiCompatible("https://api.openai.com/v1/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
+                ModelProvider.DEEPSEEK -> callOpenAiCompatible("https://api.deepseek.com/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
+                ModelProvider.QWEN -> callOpenAiCompatible("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider.modelName, apiKey, encoded, customPrompt)
+                ModelProvider.GEMINI -> callGemini(provider.modelName, apiKey, encoded, customPrompt)
+                ModelProvider.ANTHROPIC -> callAnthropic(provider.modelName, apiKey, encoded, customPrompt)
             }
             parseResult(response)
         }
 
-    private fun callOpenAiCompatible(url: String, model: String, key: String, images: List<String>): String {
-        val content = JSONArray().put(JSONObject().put("type", "text").put("text", PROMPT))
+    private fun callOpenAiCompatible(url: String, model: String, key: String, images: List<String>, customPrompt: String): String {
+        val content = JSONArray().put(JSONObject().put("type", "text").put("text", finalPrompt(customPrompt)))
         images.forEach { data ->
             content.put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$data")))
         }
@@ -43,8 +52,8 @@ class FoodRecognitionService(private val context: Context) {
         return json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
     }
 
-    private fun callGemini(model: String, key: String, images: List<String>): String {
-        val parts = JSONArray().put(JSONObject().put("text", PROMPT))
+    private fun callGemini(model: String, key: String, images: List<String>, customPrompt: String): String {
+        val parts = JSONArray().put(JSONObject().put("text", finalPrompt(customPrompt)))
         images.forEach { data ->
             parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", data)))
         }
@@ -54,8 +63,8 @@ class FoodRecognitionService(private val context: Context) {
             .getJSONArray("parts").getJSONObject(0).getString("text")
     }
 
-    private fun callAnthropic(model: String, key: String, images: List<String>): String {
-        val content = JSONArray().put(JSONObject().put("type", "text").put("text", PROMPT))
+    private fun callAnthropic(model: String, key: String, images: List<String>, customPrompt: String): String {
+        val content = JSONArray().put(JSONObject().put("type", "text").put("text", finalPrompt(customPrompt)))
         images.forEach { data ->
             content.put(JSONObject().put("type", "image").put("source", JSONObject()
                 .put("type", "base64").put("media_type", "image/jpeg").put("data", data)))
@@ -107,14 +116,21 @@ class FoodRecognitionService(private val context: Context) {
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val json = JSONObject(cleaned)
         return RecognitionResult(
-            meal = json.optString("meal", "识别到的餐食"),
-            category = json.optString("category", "餐饮").takeIf { it in CATEGORIES } ?: "餐饮",
-            suggestedAmount = json.optDouble("suggestedAmount", 0.0).takeIf { !it.isNaN() } ?: 0.0
+            merchant = json.optString("店家").trim(),
+            product = json.optString("商品", "识别到的商品").trim(),
+            description = json.optString("主要描述").trim(),
+            category = json.optString("分类", "餐饮").takeIf { it in CATEGORIES } ?: "餐饮",
+            amount = json.optDouble("金额", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+            rawResponse = raw
         )
     }
 
+    private fun finalPrompt(customPrompt: String) = """$customPrompt
+必须只返回一个合法JSON对象，不得包含Markdown或额外文字。字段和格式必须严格为：
+{"店家":"店家名称，没有则为空字符串","商品":"商品或餐食名称","主要描述":"商品明细、规格或识别说明","金额":0.00,"分类":"餐饮"}
+金额必须是JSON数字。分类只能是：餐饮、水果、零食、饮品、买菜、其他。"""
+
     private companion object {
         val CATEGORIES = setOf("餐饮", "水果", "零食", "饮品", "买菜", "其他")
-        const val PROMPT = """请识别所有图片里的食物或饮品，合并成简洁中文名称。只返回JSON，不要Markdown：{"meal":"食物名称","category":"餐饮/水果/零食/饮品/买菜/其他六选一","suggestedAmount":0}。无法从图片确定实际消费金额时，suggestedAmount必须为0。"""
     }
 }
