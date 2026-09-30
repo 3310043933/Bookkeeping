@@ -6,6 +6,9 @@ data class LedgerEntry(
     val meal: String,
     val amount: Double,
     val category: String,
+    val primaryCategory: String = category,
+    val secondaryCategory: String = category,
+    val transactionType: String = "EXPENSE",
     val note: String,
     val imageUris: List<String> = emptyList()
 )

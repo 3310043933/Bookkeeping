@@ -18,6 +18,9 @@ class LedgerRepository(context: Context) {
                 meal = item.getString("meal"),
                 amount = item.getDouble("amount"),
                 category = item.getString("category"),
+                primaryCategory = item.optString("primaryCategory", item.getString("category")),
+                secondaryCategory = item.optString("secondaryCategory", item.getString("category")),
+                transactionType = item.optString("transactionType", "EXPENSE"),
                 note = item.optString("note"),
                 imageUris = List(photos.length()) { photos.getString(it) }
             )
@@ -33,6 +36,9 @@ class LedgerRepository(context: Context) {
                 put("meal", entry.meal)
                 put("amount", entry.amount)
                 put("category", entry.category)
+                put("primaryCategory", entry.primaryCategory)
+                put("secondaryCategory", entry.secondaryCategory)
+                put("transactionType", entry.transactionType)
                 put("note", entry.note)
                 put("imageUris", JSONArray(entry.imageUris))
             })

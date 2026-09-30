@@ -44,12 +44,13 @@ private val categories = listOf("餐饮", "水果", "零食", "饮品", "买菜"
 fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
+    var editingEntry by remember { mutableStateOf<LedgerEntry?>(null) }
     var tab by remember { mutableIntStateOf(0) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val todayStart = remember { startOfToday() }
     val todayEntries = state.entries.filter { it.createdAt >= todayStart }
-    val todayTotal = todayEntries.sumOf { it.amount }
+    val todayTotal = todayEntries.filter { it.transactionType == "EXPENSE" }.sumOf { it.amount }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -60,7 +61,8 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
                     onSelect = vm::selectProvider,
                     onSaveKey = vm::saveProviderKey,
                     onSavePrompt = vm::saveRecognitionPrompt,
-                    onClearLogs = vm::clearRequestLogs
+                    onClearLogs = vm::clearRequestLogs,
+                    onAddCategory = vm::addCategory
                 )
             }
         }
@@ -80,7 +82,8 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.Home, null) }, label = { Text("今天") })
-                    NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Default.ReceiptLong, null) }, label = { Text("全部") })
+                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Default.ReceiptLong, null) }, label = { Text("全部") })
+                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.BarChart, null) }, label = { Text("统计") })
                 }
             },
             floatingActionButton = {
@@ -90,7 +93,7 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
             Column(Modifier.padding(padding).fillMaxSize()) {
                 SummaryCard(todayTotal, todayEntries.size)
                 val shown = if (tab == 0) todayEntries else state.entries
-                EntryList(shown, vm::delete, Modifier.weight(1f))
+                if(tab==2) StatisticsView(state.entries, Modifier.weight(1f)) else EntryList(shown, vm::delete, { entry -> editingEntry=entry; vm.setImages(entry.imageUris.map(Uri::parse)); showAdd=true }, Modifier.weight(1f))
             }
         }
     }
@@ -98,13 +101,15 @@ fun FoodLedgerApp(vm: LedgerViewModel = viewModel()) {
     if (showAdd) {
         AddEntrySheet(
             state = state,
-            onDismiss = { showAdd = false; vm.consumeRecognition() },
+            existing = editingEntry,
+            onDismiss = { showAdd = false; editingEntry=null; vm.setImages(emptyList()); vm.consumeRecognition() },
             onImages = vm::setImages,
             onRemoveImage = vm::removeImage,
             onRecognize = vm::recognizeImages,
-            onSave = { meal, amount, category, note ->
-                vm.add(meal, amount, category, note)
+            onSave = { meal, amount, primary, secondary, type, note ->
+                vm.saveEntry(editingEntry, meal, amount, primary, secondary, type, note)
                 vm.consumeRecognition()
+                editingEntry=null
                 showAdd = false
             }
         )
@@ -117,7 +122,8 @@ private fun AppDrawer(
     onSelect: (ModelProvider) -> Unit,
     onSaveKey: (ModelProvider, String) -> Unit,
     onSavePrompt: (String) -> Unit,
-    onClearLogs: () -> Unit
+    onClearLogs: () -> Unit,
+    onAddCategory: (String,String) -> Unit
 ) {
     var section by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -131,6 +137,10 @@ private fun AppDrawer(
             onClick = { section = 1 }, icon = { Icon(Icons.Default.History, null) }, modifier = Modifier.padding(horizontal = 12.dp)
         )
         NavigationDrawerItem(
+            label = { Text("分类管理") }, selected = section == 3,
+            onClick = { section = 3 }, icon = { Icon(Icons.Default.Category, null) }, modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        NavigationDrawerItem(
             label = { Text("识别指令设置") }, selected = section == 2,
             onClick = { section = 2 }, icon = { Icon(Icons.Default.EditNote, null) }, modifier = Modifier.padding(horizontal = 12.dp)
         )
@@ -139,10 +149,29 @@ private fun AppDrawer(
             when (section) {
                 0 -> KeySettingsContent(state, onSelect, onSaveKey)
                 1 -> RequestLogsContent(state, onClearLogs)
-                else -> PromptSettingsContent(state.recognitionPrompt, onSavePrompt)
+                2 -> PromptSettingsContent(state.recognitionPrompt, onSavePrompt)
+                else -> CategorySettingsContent(state, onAddCategory)
             }
         }
     }
+}
+
+@Composable private fun CategorySettingsContent(state: LedgerUiState,onAdd:(String,String)->Unit){
+ var p by remember{mutableStateOf("")};var s by remember{mutableStateOf("")}
+ LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+  item{Text("一级 / 二级分类",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
+  items(state.categories.entries.toList()){e->Card{Column(Modifier.padding(12.dp)){Text(e.key,fontWeight=FontWeight.Bold);Text(e.value.joinToString(" · "),style=MaterialTheme.typography.bodySmall)}}}
+  item{OutlinedTextField(p,{p=it},Modifier.fillMaxWidth(),label={Text("一级类别")});OutlinedTextField(s,{s=it},Modifier.fillMaxWidth(),label={Text("二级类别")});Button({onAdd(p,s);s=""},Modifier.fillMaxWidth()){Text("添加分类")}}
+ }
+}
+
+@Composable private fun StatisticsView(entries:List<LedgerEntry>,modifier:Modifier=Modifier){
+ var days by remember{mutableIntStateOf(7)};val since=System.currentTimeMillis()-days*86400000L;val list=entries.filter{it.createdAt>=since};val expense=list.filter{it.transactionType=="EXPENSE"}.sumOf{it.amount};val income=list.filter{it.transactionType=="INCOME"}.sumOf{it.amount};
+ LazyColumn(modifier,contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+  item{Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(days==7,{days=7},{Text("本周")});FilterChip(days==30,{days=30},{Text("本月")});FilterChip(days==365,{days=365},{Text("本年")})}}
+  item{Card{Row(Modifier.fillMaxWidth().padding(20.dp),horizontalArrangement=Arrangement.SpaceBetween){Column{Text("收入");Text("+¥%.2f".format(income),color=Color(0xFF2E7D32),fontWeight=FontWeight.Bold)};Column{Text("消费");Text("-¥%.2f".format(expense),color=MaterialTheme.colorScheme.error,fontWeight=FontWeight.Bold)};Column{Text("结余");Text("¥%.2f".format(income-expense),fontWeight=FontWeight.Bold)}}}}
+  items(list.filter{it.transactionType=="EXPENSE"}.groupBy{it.primaryCategory}.mapValues{it.value.sumOf{e->e.amount}}.entries.sortedByDescending{it.value}){e->ListItem(headlineContent={Text(e.key)},trailingContent={Text("¥%.2f".format(e.value))})}
+ }
 }
 
 @Composable
@@ -279,7 +308,7 @@ private fun SummaryCard(total: Double, count: Int) {
 }
 
 @Composable
-private fun EntryList(entries: List<LedgerEntry>, onDelete: (Long) -> Unit, modifier: Modifier = Modifier) {
+private fun EntryList(entries: List<LedgerEntry>, onDelete: (Long) -> Unit, onEdit: (LedgerEntry) -> Unit, modifier: Modifier = Modifier) {
     if (entries.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -291,12 +320,12 @@ private fun EntryList(entries: List<LedgerEntry>, onDelete: (Long) -> Unit, modi
         return
     }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(entries, key = { it.id }) { entry -> EntryCard(entry, onDelete) }
+        items(entries, key = { it.id }) { entry -> EntryCard(entry, onDelete, onEdit) }
     }
 }
 
 @Composable
-private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit) {
+private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit, onEdit: (LedgerEntry) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -306,14 +335,15 @@ private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(entry.meal, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${entry.category} · ${formatTime(entry.createdAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                Text("${entry.primaryCategory} / ${entry.secondaryCategory} · ${formatTime(entry.createdAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                 if (entry.note.isNotBlank()) Text(entry.note, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 if (entry.imageUris.isNotEmpty()) Text("${entry.imageUris.size} 张图片", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
-            Text("¥ %.2f".format(entry.amount), fontWeight = FontWeight.Bold)
+            Text("${if(entry.transactionType=="INCOME") "+" else "-"}¥ %.2f".format(entry.amount), fontWeight = FontWeight.Bold, color=if(entry.transactionType=="INCOME") Color(0xFF2E7D32) else MaterialTheme.colorScheme.error)
             Box {
                 IconButton({ menu = true }) { Icon(Icons.Default.MoreVert, "更多") }
                 DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem({ Text("修改") }, onClick = { menu=false; onEdit(entry) }, leadingIcon = { Icon(Icons.Default.Edit, null) })
                     DropdownMenuItem({ Text("删除") }, onClick = { menu = false; onDelete(entry.id) }, leadingIcon = { Icon(Icons.Default.Delete, null) })
                 }
             }
@@ -325,23 +355,26 @@ private fun EntryCard(entry: LedgerEntry, onDelete: (Long) -> Unit) {
 @Composable
 private fun AddEntrySheet(
     state: LedgerUiState,
+    existing: LedgerEntry?,
     onDismiss: () -> Unit,
     onImages: (List<Uri>) -> Unit,
     onRemoveImage: (Uri) -> Unit,
     onRecognize: () -> Unit,
-    onSave: (String, Double, String, String) -> Unit
+    onSave: (String, Double, String, String, String, String) -> Unit
 ) {
     val context = LocalContext.current
-    var meal by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("餐饮") }
-    var note by remember { mutableStateOf("") }
+    var meal by remember(existing) { mutableStateOf(existing?.meal.orEmpty()) }
+    var amount by remember(existing) { mutableStateOf(existing?.amount?.toString().orEmpty()) }
+    var primary by remember(existing) { mutableStateOf(existing?.primaryCategory ?: state.categories.keys.firstOrNull().orEmpty()) }
+    var secondary by remember(existing, primary) { mutableStateOf(existing?.secondaryCategory ?: state.categories[primary]?.firstOrNull().orEmpty()) }
+    var type by remember(existing) { mutableStateOf(existing?.transactionType ?: "EXPENSE") }
+    var note by remember(existing) { mutableStateOf(existing?.note.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.recognizedMeal) {
         if (state.recognizedMeal.isNotBlank()) {
             meal = state.recognizedMeal
-            category = state.recognizedCategory
+            secondary = state.recognizedCategory
             if (state.recognizedAmount.isNotBlank()) amount = state.recognizedAmount
             note = state.recognizedNote
         }
@@ -360,7 +393,8 @@ private fun AddEntrySheet(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item { Text("记一笔", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { Text(if(existing==null) "记一笔" else "修改记录", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { FilterChip(type=="EXPENSE",{type="EXPENSE"},{Text("消费 -")}); FilterChip(type=="INCOME",{type="INCOME"},{Text("收入 +")}) } }
             item {
                 OutlinedTextField(meal, { meal = it; error = null }, Modifier.fillMaxWidth(), label = { Text("今天吃了什么") }, singleLine = true)
             }
@@ -371,10 +405,12 @@ private fun AddEntrySheet(
                 )
             }
             item {
-                Text("分类", style = MaterialTheme.typography.labelLarge)
+                Text("一级分类", style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(categories) { item -> FilterChip(category == item, { category = item }, { Text(item) }) }
+                    items(state.categories.keys.toList()) { item -> FilterChip(primary == item, { primary=item; secondary=state.categories[item]?.firstOrNull().orEmpty() }, { Text(item) }) }
                 }
+                Text("二级分类", style = MaterialTheme.typography.labelLarge)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(state.categories[primary].orEmpty()) { item -> FilterChip(secondary==item,{secondary=item},{Text(item)}) } }
             }
             item {
                 OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("备注（可选）") }, minLines = 2)
@@ -430,7 +466,7 @@ private fun AddEntrySheet(
                         when {
                             meal.isBlank() -> error = "请填写吃了什么"
                             value == null || value < 0 -> error = "请输入正确金额"
-                            else -> onSave(meal, value, category, note)
+                            else -> onSave(meal, value, primary, secondary, type, note)
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp)

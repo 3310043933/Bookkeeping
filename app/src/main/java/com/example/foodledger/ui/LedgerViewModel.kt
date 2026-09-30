@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.foodledger.data.LedgerEntry
 import com.example.foodledger.data.LedgerRepository
+import com.example.foodledger.data.CategoryRepository
 import com.example.foodledger.recognition.FoodRecognitionService
 import com.example.foodledger.recognition.ModelProvider
 import com.example.foodledger.recognition.ModelRequestLog
@@ -28,11 +29,13 @@ data class LedgerUiState(
     val selectedProvider: ModelProvider = ModelProvider.OPENAI,
     val providerKeys: Map<ModelProvider, String> = emptyMap(),
     val recognitionPrompt: String = ModelSettingsRepository.DEFAULT_PROMPT,
-    val requestLogs: List<ModelRequestLog> = emptyList()
+    val requestLogs: List<ModelRequestLog> = emptyList(),
+    val categories: Map<String, List<String>> = emptyMap()
 )
 
 class LedgerViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = LedgerRepository(application)
+    private val categoryRepository = CategoryRepository(application)
     private val settings = ModelSettingsRepository(application)
     private val requestLogRepository = RequestLogRepository(application)
     private val recognition = FoodRecognitionService(application)
@@ -41,7 +44,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         selectedProvider = settings.selectedProvider(),
         providerKeys = ModelProvider.entries.associateWith(settings::getKey),
         recognitionPrompt = settings.recognitionPrompt(),
-        requestLogs = requestLogRepository.load()
+        requestLogs = requestLogRepository.load(), categories = categoryRepository.load()
     ))
     val state: StateFlow<LedgerUiState> = _state.asStateFlow()
 
@@ -120,18 +123,21 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    fun add(meal: String, amount: Double, category: String, note: String) {
+    fun saveEntry(existing: LedgerEntry?, meal: String, amount: Double, primary: String, secondary: String, type: String, note: String) {
         val entry = LedgerEntry(
+            id = existing?.id ?: System.currentTimeMillis(), createdAt = existing?.createdAt ?: System.currentTimeMillis(),
             meal = meal.trim(),
             amount = amount,
-            category = category,
+            category = secondary, primaryCategory = primary, secondaryCategory = secondary, transactionType = type,
             note = note.trim(),
             imageUris = _state.value.selectedImages.map(Uri::toString)
         )
-        val updated = listOf(entry) + _state.value.entries
+        val updated = if(existing==null) listOf(entry)+_state.value.entries else _state.value.entries.map{if(it.id==existing.id)entry else it}
         repository.save(updated)
         _state.value = _state.value.copy(entries = updated, selectedImages = emptyList())
     }
+
+    fun addCategory(primary: String, secondary: String) { if(primary.isBlank()||secondary.isBlank())return; val m=_state.value.categories.toMutableMap(); m[primary]=(m[primary].orEmpty()+secondary).distinct(); categoryRepository.save(m); _state.value=_state.value.copy(categories=m) }
 
     fun delete(id: Long) {
         val updated = _state.value.entries.filterNot { it.id == id }
